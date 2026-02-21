@@ -57,25 +57,6 @@ uvx --from git+https://github.com/iamwrm/pdf_attachments pdf-attachments add doc
 > pdf-attachments list document.pdf
 > ```
 
-## As a library
-
-```python
-from pdf_attachments import list_attachments, get_attachment, add_attachment
-from pathlib import Path
-
-# List
-for att in list_attachments("doc.pdf"):
-    print(att.name, att.size)
-
-# Extract
-att = get_attachment("doc.pdf", "data.csv")
-if att and att.data:
-    Path("data.csv").write_bytes(att.data)
-
-# Add
-add_attachment("doc.pdf", [Path("notes.txt")], "output.pdf")
-```
-
 ## Development
 
 ```bash
