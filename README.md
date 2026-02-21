@@ -18,27 +18,44 @@ pdf-attachments <command> ...
 uv pip install git+https://github.com/iamwrm/pdf_attachments
 ```
 
+## Quick Start
+
+```bash
+# Run directly from GitHub — no install needed
+uvx --from git+https://github.com/iamwrm/pdf_attachments pdf-attachments list document.pdf
+```
+
 ## Usage
 
 ### List attachments
 
-```bash
-pdf-attachments list document.pdf
+```
+$ uvx --from git+https://github.com/iamwrm/pdf_attachments pdf-attachments list test.pdf
+PDF: test.pdf
+Attachments: 1
+--------------------------------------------------
+  hello.txt  —  13 bytes
 ```
 
 ### Extract an attachment
 
-```bash
-pdf-attachments get document.pdf report.xlsx
-pdf-attachments get document.pdf report.xlsx -o /tmp/report.xlsx
+```
+$ uvx --from git+https://github.com/iamwrm/pdf_attachments pdf-attachments get test.pdf hello.txt -o /tmp/hello.txt
+Extracted: hello.txt → /tmp/hello.txt  (13 bytes)
 ```
 
 ### Add attachments
 
 ```bash
-pdf-attachments add document.pdf data.csv image.png
-pdf-attachments add document.pdf data.csv -o document_with_attachments.pdf
+uvx --from git+https://github.com/iamwrm/pdf_attachments pdf-attachments add document.pdf data.csv image.png
+uvx --from git+https://github.com/iamwrm/pdf_attachments pdf-attachments add document.pdf data.csv -o document_with_attachments.pdf
 ```
+
+> **Tip:** To avoid typing the full `uvx --from ...` each time, install it as a tool:
+> ```bash
+> uv tool install git+https://github.com/iamwrm/pdf_attachments
+> pdf-attachments list document.pdf
+> ```
 
 ## As a library
 
