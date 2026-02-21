@@ -1,17 +1,30 @@
 #!/usr/bin/env python3
-"""Manage PDF attachments: list, extract (get), and add."""
+"""Manage PDF attachments: list, extract (get), and add.
+
+A CLI tool for working with file attachments embedded in PDF documents.
+Supports document-level and page-level (annotation) attachments.
+
+Commands:
+  list  — Show all attachments in a PDF (name, size, page, description).
+  get   — Extract a single attachment by exact filename.
+  add   — Embed one or more files into a PDF as attachments.
+
+Exit codes:
+  0  Success.
+  1  Error (file not found, attachment not found, invalid PDF).
+"""
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["pypdf"]
+# dependencies = ["pypdf", "typer"]
 # ///
 
 from __future__ import annotations
 
-import argparse
-import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Annotated
 
+import typer
 from pypdf import PdfReader, PdfWriter
 
 # ---------------------------------------------------------------------------
@@ -147,69 +160,139 @@ def add_attachment(pdf_path: str, files: list[Path], output_path: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# CLI (typer)
 # ---------------------------------------------------------------------------
 
+app = typer.Typer(
+    name="pdf-attachments",
+    help=(
+        "List, extract, and add file attachments in PDF documents.\n\n"
+        "Supports both document-level embedded files and page-level "
+        "FileAttachment annotations.\n\n"
+        "EXAMPLES:\n\n"
+        "  pdf-attachments list report.pdf\n\n"
+        "  pdf-attachments get report.pdf data.csv\n\n"
+        "  pdf-attachments get report.pdf data.csv --output /tmp/data.csv\n\n"
+        "  pdf-attachments add report.pdf notes.txt image.png\n\n"
+        "  pdf-attachments add report.pdf notes.txt --output report_new.pdf\n\n"
+        "EXIT CODES:  0 = success, 1 = error (file/attachment not found, invalid PDF)."
+    ),
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
 
-def _cmd_list(args: argparse.Namespace) -> None:
-    attachments = list_attachments(args.pdf)
-    print(f"PDF: {args.pdf}")
-    print(f"Attachments: {len(attachments)}")
-    print("-" * 50)
+
+@app.command(
+    "list",
+    help="List all attachments in a PDF. Prints name, size, page, and description.",
+)
+def cmd_list(
+    pdf: Annotated[
+        Path,
+        typer.Argument(help="Path to the input PDF file to inspect."),
+    ],
+) -> None:
+    """Output format (stdout, one attachment per block):
+
+      <filename> (page <N>)  —  <size> bytes
+        <description>
+
+    Returns exit code 0 even when there are no attachments.
+    """
+    if not pdf.is_file():
+        typer.echo(f"Error: file not found: {pdf}", err=True)
+        raise typer.Exit(1)
+
+    attachments = list_attachments(str(pdf))
+    typer.echo(f"PDF: {pdf}")
+    typer.echo(f"Attachments: {len(attachments)}")
+    typer.echo("-" * 50)
     if attachments:
-        print("\n".join(str(a) for a in attachments))
+        typer.echo("\n".join(str(a) for a in attachments))
     else:
-        print("  (none)")
+        typer.echo("  (none)")
 
 
-def _cmd_get(args: argparse.Namespace) -> None:
-    att = get_attachment(args.pdf, args.name)
+@app.command("get", help="Extract a single attachment by its exact filename and save it to disk.")
+def cmd_get(
+    pdf: Annotated[
+        Path,
+        typer.Argument(help="Path to the input PDF file containing the attachment."),
+    ],
+    name: Annotated[
+        str,
+        typer.Argument(
+            help="Exact filename of the attachment to extract. Use 'list' to see names."
+        ),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output file path. Defaults to the attachment's filename in the CWD.",
+        ),
+    ] = None,
+) -> None:
+    """Writes the attachment bytes to the output path.
+
+    Prints: "Extracted: <name> → <path>  (<size> bytes)" on success.
+    Exit code 1 if the attachment is not found.
+    """
+    if not pdf.is_file():
+        typer.echo(f"Error: file not found: {pdf}", err=True)
+        raise typer.Exit(1)
+
+    att = get_attachment(str(pdf), name)
     if att is None or att.data is None:
-        print(f"Attachment '{args.name}' not found.", file=sys.stderr)
-        sys.exit(1)
+        typer.echo(f"Error: attachment '{name}' not found in {pdf}.", err=True)
+        raise typer.Exit(1)
 
-    out = Path(args.output) if args.output else Path(att.name)
+    out = output if output else Path(att.name)
     out.write_bytes(att.data)
-    print(f"Extracted: {att.name} → {out}  ({len(att.data)} bytes)")
+    typer.echo(f"Extracted: {att.name} → {out}  ({len(att.data)} bytes)")
 
 
-def _cmd_add(args: argparse.Namespace) -> None:
-    files = [Path(f) for f in args.files]
+@app.command("add", help="Embed one or more files into a PDF as document-level attachments.")
+def cmd_add(
+    pdf: Annotated[
+        Path,
+        typer.Argument(help="Path to the input PDF file to add attachments to."),
+    ],
+    files: Annotated[
+        list[Path],
+        typer.Argument(help="One or more file paths to embed as attachments."),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output PDF path. Defaults to overwriting the input PDF in place.",
+        ),
+    ] = None,
+) -> None:
+    """Clones the input PDF, embeds the given files, and writes the result.
+
+    Prints: "Added <N> attachment(s) → <path>" on success.
+    Exit code 1 if any input file is missing.
+    """
+    if not pdf.is_file():
+        typer.echo(f"Error: PDF file not found: {pdf}", err=True)
+        raise typer.Exit(1)
+
     for f in files:
         if not f.is_file():
-            print(f"File not found: {f}", file=sys.stderr)
-            sys.exit(1)
+            typer.echo(f"Error: file not found: {f}", err=True)
+            raise typer.Exit(1)
 
-    output = args.output or args.pdf
-    count = add_attachment(args.pdf, files, output)
-    print(f"Added {count} attachment(s) → {output}")
+    out = str(output) if output else str(pdf)
+    count = add_attachment(str(pdf), files, out)
+    typer.echo(f"Added {count} attachment(s) → {out}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        prog="pdf_attachments",
-        description="List, extract, and add PDF attachments.",
-    )
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    # list
-    p_list = sub.add_parser("list", help="List attachments in a PDF")
-    p_list.add_argument("pdf", help="Input PDF file")
-
-    # get
-    p_get = sub.add_parser("get", help="Extract an attachment by name")
-    p_get.add_argument("pdf", help="Input PDF file")
-    p_get.add_argument("name", help="Attachment filename to extract")
-    p_get.add_argument("-o", "--output", help="Output path (default: attachment name)")
-
-    # add
-    p_add = sub.add_parser("add", help="Add file(s) as attachments to a PDF")
-    p_add.add_argument("pdf", help="Input PDF file")
-    p_add.add_argument("files", nargs="+", help="File(s) to attach")
-    p_add.add_argument("-o", "--output", help="Output PDF path (default: overwrite input)")
-
-    args = parser.parse_args()
-    {"list": _cmd_list, "get": _cmd_get, "add": _cmd_add}[args.command](args)
+    app()
 
 
 if __name__ == "__main__":

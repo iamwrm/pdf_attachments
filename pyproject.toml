@@ -9,7 +9,10 @@ description = "List, extract, and add PDF attachments from the command line."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-dependencies = ["pypdf"]
+dependencies = [
+    "pypdf",
+    "typer>=0.24.0",
+]
 
 [project.scripts]
 pdf-attachments = "pdf_attachments:main"
