@@ -7,11 +7,15 @@ A CLI tool to **list**, **extract**, and **add** file attachments in PDF documen
 Requires Python ≥ 3.10.
 
 ```bash
-# Install with uv
-uv pip install .
+# Run directly from GitHub (no install needed)
+uvx --from git+https://github.com/iamwrm/pdf_attachments pdf-attachments <command> ...
 
-# Or run directly without installing
-uv run pdf_attachments.py <command> ...
+# Or install as a tool
+uv tool install git+https://github.com/iamwrm/pdf_attachments
+pdf-attachments <command> ...
+
+# Or install into current environment
+uv pip install git+https://github.com/iamwrm/pdf_attachments
 ```
 
 ## Usage
