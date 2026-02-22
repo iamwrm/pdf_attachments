@@ -69,15 +69,23 @@ def _stream_size(ef: dict) -> int | None:
         return None
 
 
+class CorruptAttachmentError(Exception):
+    """Raised when an attachment exists but its data cannot be decoded."""
+
+
 def _stream_data(ef: dict) -> bytes | None:
-    """Extract raw bytes from an embedded file stream."""
+    """Extract raw bytes from an embedded file stream.
+
+    Raises:
+        CorruptAttachmentError: If the stream exists but cannot be decoded.
+    """
     stream = ef.get("/F")
     if stream is None:
         return None
     try:
         return stream.get_object().get_data()
-    except Exception:
-        return None
+    except Exception as exc:
+        raise CorruptAttachmentError(f"Failed to decode attachment stream: {exc}") from exc
 
 
 def _get_document_attachments(reader: PdfReader, *, with_data: bool = False) -> list[Attachment]:
@@ -287,7 +295,11 @@ def cmd_get(
         typer.echo(f"Error: file not found: {pdf}", err=True)
         raise typer.Exit(1)
 
-    att = get_attachment(str(pdf), name)
+    try:
+        att = get_attachment(str(pdf), name)
+    except CorruptAttachmentError as e:
+        typer.echo(f"Error: attachment '{name}' is corrupt: {e}", err=True)
+        raise typer.Exit(1) from None
     if att is None or att.data is None:
         typer.echo(f"Error: attachment '{name}' not found in {pdf}.", err=True)
         raise typer.Exit(1)
@@ -336,9 +348,17 @@ def cmd_add(
         typer.Option(
             "--output",
             "-o",
-            help="Output PDF path. Defaults to overwriting the input PDF in place.",
+            help="Output PDF path. Required unless --in-place is set.",
         ),
     ] = None,
+    in_place: Annotated[
+        bool,
+        typer.Option(
+            "--in-place",
+            "-i",
+            help="Overwrite the input PDF in place.",
+        ),
+    ] = False,
     name: Annotated[
         list[str] | None,
         typer.Option(
@@ -370,6 +390,17 @@ def cmd_add(
     if unknown:
         typer.echo(
             f"Error: --name key(s) don't match any input file: {', '.join(sorted(unknown))}",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    if output and in_place:
+        typer.echo("Error: --output and --in-place are mutually exclusive.", err=True)
+        raise typer.Exit(1)
+    if not output and not in_place:
+        typer.echo(
+            "Error: specify --output/-o or --in-place/-i. "
+            "Refusing to overwrite input PDF without explicit --in-place.",
             err=True,
         )
         raise typer.Exit(1)

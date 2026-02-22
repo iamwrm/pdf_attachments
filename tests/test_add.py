@@ -1,4 +1,4 @@
-"""Tests for duplicate detection and --name rename feature."""
+"""Tests for add command: duplicate detection, --name rename, --in-place, error handling."""
 
 from __future__ import annotations
 
@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from pdf_attachments import add_attachment, app, list_attachments
+from pdf_attachments import (
+    CorruptAttachmentError,
+    add_attachment,
+    app,
+    get_attachment,
+    list_attachments,
+)
 
 runner = CliRunner()
 
@@ -103,7 +109,6 @@ class TestAddAttachmentAPI:
         assert names == {"existing.txt", "existing_v2.txt"}
 
     def test_rename_avoids_input_collision(self, minimal_pdf: Path, tmp_path: Path) -> None:
-        """Renaming one of two same-named inputs should succeed."""
         dir_a = tmp_path / "a"
         dir_b = tmp_path / "b"
         dir_a.mkdir()
@@ -111,7 +116,6 @@ class TestAddAttachmentAPI:
         (dir_a / "data.txt").write_text("aaa")
         (dir_b / "other.txt").write_text("bbb")
         out = tmp_path / "out.pdf"
-        # No collision — different names.
         count = add_attachment(
             str(minimal_pdf),
             [dir_a / "data.txt", dir_b / "other.txt"],
@@ -119,20 +123,118 @@ class TestAddAttachmentAPI:
         )
         assert count == 2
 
+    def test_roundtrip_data_integrity(self, minimal_pdf: Path, tmp_path: Path) -> None:
+        """Add a file, extract it, verify bytes match."""
+        content = b"\x00\x01\x02\xff" * 100
+        binary_file = tmp_path / "binary.bin"
+        binary_file.write_bytes(content)
+        out = tmp_path / "out.pdf"
+        add_attachment(str(minimal_pdf), [binary_file], str(out))
+        att = get_attachment(str(out), "binary.bin")
+        assert att is not None
+        assert att.data == content
 
-# ── CLI-level tests ──────────────────────────────────────────────────
+
+# ── --in-place CLI tests ─────────────────────────────────────────────
 
 
-class TestAddCLI:
-    def test_cli_add_basic(self, minimal_pdf: Path, sample_file: Path) -> None:
+class TestInPlace:
+    def test_cli_no_output_no_inplace_errors(self, minimal_pdf: Path, sample_file: Path) -> None:
+        """Without --output or --in-place, the CLI should refuse."""
         result = runner.invoke(app, ["add", str(minimal_pdf), str(sample_file)])
-        assert result.exit_code == 0
-        assert "Added 1 attachment(s)" in result.stdout
+        assert result.exit_code == 1
+        assert "--in-place" in result.stderr
 
+    def test_cli_output_and_inplace_errors(
+        self, minimal_pdf: Path, sample_file: Path, tmp_path: Path
+    ) -> None:
+        """--output and --in-place are mutually exclusive."""
+        out = tmp_path / "out.pdf"
+        result = runner.invoke(
+            app,
+            ["add", str(minimal_pdf), str(sample_file), "-o", str(out), "--in-place"],
+        )
+        assert result.exit_code == 1
+        assert "mutually exclusive" in result.stderr
+
+    def test_cli_inplace_works(self, minimal_pdf: Path, sample_file: Path) -> None:
+        """--in-place should overwrite the input PDF."""
+        result = runner.invoke(app, ["add", str(minimal_pdf), str(sample_file), "--in-place"])
+        assert result.exit_code == 0
+        assert "Added 1" in result.stdout
+        atts = list_attachments(str(minimal_pdf))
+        assert len(atts) == 1
+        assert atts[0].name == "data.csv"
+
+    def test_cli_inplace_short_flag(self, minimal_pdf: Path, sample_file: Path) -> None:
+        """-i should work as short form of --in-place."""
+        result = runner.invoke(app, ["add", str(minimal_pdf), str(sample_file), "-i"])
+        assert result.exit_code == 0
+        assert "Added 1" in result.stdout
+
+    def test_cli_output_works(self, minimal_pdf: Path, sample_file: Path, tmp_path: Path) -> None:
+        """--output should write to a different file."""
+        out = tmp_path / "out.pdf"
+        result = runner.invoke(app, ["add", str(minimal_pdf), str(sample_file), "-o", str(out)])
+        assert result.exit_code == 0
+        assert out.exists()
+        # Original should be unchanged (no attachments).
+        assert len(list_attachments(str(minimal_pdf))) == 0
+        assert len(list_attachments(str(out))) == 1
+
+
+# ── Error handling tests ─────────────────────────────────────────────
+
+
+class TestErrorHandling:
+    def test_corrupt_attachment_error_type(self) -> None:
+        """CorruptAttachmentError is a distinct exception."""
+        exc = CorruptAttachmentError("bad stream")
+        assert isinstance(exc, Exception)
+        assert "bad stream" in str(exc)
+
+    def test_cli_get_missing_attachment(self, minimal_pdf: Path) -> None:
+        result = runner.invoke(app, ["get", str(minimal_pdf), "nonexistent.txt"])
+        assert result.exit_code == 1
+        assert "not found" in result.stderr
+
+    def test_cli_get_missing_pdf(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["get", str(tmp_path / "nope.pdf"), "x.txt"])
+        assert result.exit_code == 1
+        assert "file not found" in result.stderr
+
+    def test_cli_add_missing_pdf(self, tmp_path: Path) -> None:
+        f = tmp_path / "data.txt"
+        f.write_text("x")
+        result = runner.invoke(app, ["add", str(tmp_path / "nope.pdf"), str(f), "-i"])
+        assert result.exit_code == 1
+        assert "not found" in result.stderr
+
+    def test_cli_add_missing_input_file(self, minimal_pdf: Path, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["add", str(minimal_pdf), str(tmp_path / "ghost.txt"), "-i"])
+        assert result.exit_code == 1
+        assert "not found" in result.stderr
+
+    def test_cli_list_missing_pdf(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["list", str(tmp_path / "nope.pdf")])
+        assert result.exit_code == 1
+        assert "not found" in result.stderr
+
+    def test_cli_list_empty_pdf(self, minimal_pdf: Path) -> None:
+        result = runner.invoke(app, ["list", str(minimal_pdf)])
+        assert result.exit_code == 0
+        assert "Attachments: 0" in result.stdout
+        assert "(none)" in result.stdout
+
+
+# ── --name CLI tests ─────────────────────────────────────────────────
+
+
+class TestNameCLI:
     def test_cli_duplicate_errors(self, pdf_with_attachment: Path, tmp_path: Path) -> None:
         dup = tmp_path / "existing.txt"
         dup.write_text("dup")
-        result = runner.invoke(app, ["add", str(pdf_with_attachment), str(dup)])
+        result = runner.invoke(app, ["add", str(pdf_with_attachment), str(dup), "-i"])
         assert result.exit_code == 1
         assert "already exist" in result.stderr
 
@@ -157,7 +259,7 @@ class TestAddCLI:
 
     def test_cli_name_bad_format(self, minimal_pdf: Path, sample_file: Path) -> None:
         result = runner.invoke(
-            app, ["add", str(minimal_pdf), str(sample_file), "--name", "nocolon"]
+            app, ["add", str(minimal_pdf), str(sample_file), "-i", "--name", "nocolon"]
         )
         assert result.exit_code == 1
         assert "invalid --name format" in result.stderr
@@ -165,13 +267,15 @@ class TestAddCLI:
     def test_cli_name_unknown_key(self, minimal_pdf: Path, sample_file: Path) -> None:
         result = runner.invoke(
             app,
-            ["add", str(minimal_pdf), str(sample_file), "--name", "nope.txt:x.txt"],
+            ["add", str(minimal_pdf), str(sample_file), "-i", "--name", "nope.txt:x.txt"],
         )
         assert result.exit_code == 1
         assert "don't match" in result.stderr
 
     def test_cli_name_empty_parts(self, minimal_pdf: Path, sample_file: Path) -> None:
-        result = runner.invoke(app, ["add", str(minimal_pdf), str(sample_file), "--name", ":empty"])
+        result = runner.invoke(
+            app, ["add", str(minimal_pdf), str(sample_file), "-i", "--name", ":empty"]
+        )
         assert result.exit_code == 1
         assert "non-empty" in result.stderr
 
