@@ -225,8 +225,10 @@ app = typer.Typer(
         "  pdf-attachments list report.pdf\n\n"
         "  pdf-attachments get report.pdf data.csv\n\n"
         "  pdf-attachments get report.pdf data.csv --output /tmp/data.csv\n\n"
-        "  pdf-attachments add report.pdf notes.txt image.png\n\n"
-        "  pdf-attachments add report.pdf notes.txt --output report_new.pdf\n\n"
+        "  pdf-attachments add report.pdf notes.txt --in-place\n\n"
+        "  pdf-attachments add report.pdf notes.txt image.png -o report_new.pdf\n\n"
+        "  pdf-attachments add report.pdf a.csv b.csv "
+        "--name a.csv:a_v2.csv --name b.csv:report.csv -o out.pdf\n\n"
         "EXIT CODES:  0 = success, 1 = error (file/attachment not found, invalid PDF)."
     ),
     no_args_is_help=True,
