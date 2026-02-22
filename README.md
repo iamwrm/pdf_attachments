@@ -63,6 +63,23 @@ uvx --from git+https://github.com/iamwrm/pdf_attachments pdf-attachments add doc
 > pdf-attachments list document.pdf
 > ```
 
+## Self-Contained Extraction Snippet
+
+The following text can be embedded as a page or note inside a PDF itself, so that any reader (human or AI agent) can figure out how to extract attachments without prior knowledge of this tool:
+
+```
+This PDF may contain embedded file attachments. To access them, install
+uv (https://docs.astral.sh/uv/), then replace THIS.pdf and run:
+
+  # List attachments
+  uv run --with pymupdf python3 -c "import sys,fitz;d=fitz.open(sys.argv[1]);[print(d.embfile_info(i)['filename'],d.embfile_info(i)['size'],'bytes') for i in range(d.embfile_count())]" THIS.pdf
+
+  # Extract all attachments to current directory
+  uv run --with pymupdf python3 -c "import sys,fitz,pathlib;d=fitz.open(sys.argv[1]);[(pathlib.Path(n:=d.embfile_info(i)['filename']).write_bytes(d.embfile_get(i)),print('Extracted',n)) for i in range(d.embfile_count())]" THIS.pdf
+```
+
+This is useful as a self-contained section in the PDF — an AI agent encountering the file will automatically know how to extract its attachments.
+
 ## Development
 
 ```bash
