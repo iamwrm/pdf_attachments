@@ -146,12 +146,56 @@ def get_attachment(pdf_path: str, name: str) -> Attachment | None:
     return None
 
 
-def add_attachment(pdf_path: str, files: list[Path], output_path: str) -> int:
-    """Add one or more file attachments to a PDF and write the result."""
+def add_attachment(
+    pdf_path: str,
+    files: list[Path],
+    output_path: str,
+    *,
+    renames: dict[str, str] | None = None,
+) -> int:
+    """Add one or more file attachments to a PDF and write the result.
+
+    Args:
+        pdf_path: Path to the input PDF.
+        files: Files to embed.
+        output_path: Where to write the resulting PDF.
+        renames: Optional mapping of original filename → new attachment name.
+
+    Raises:
+        ValueError: If a resulting attachment name duplicates an existing one
+            in the PDF, or if two input files resolve to the same name.
+    """
+    renames = renames or {}
+
+    # Resolve final names for each input file.
+    resolved: list[tuple[Path, str]] = []
+    for file in files:
+        resolved.append((file, renames.get(file.name, file.name)))
+
+    # Check for duplicates among the input files themselves.
+    seen: dict[str, Path] = {}
+    for file, name in resolved:
+        if name in seen:
+            raise ValueError(
+                f"Duplicate input name '{name}' "
+                f"(from '{file}' and '{seen[name]}'). "
+                f"Use --name to rename one of them."
+            )
+        seen[name] = file
+
+    # Check for collisions with existing attachments in the PDF.
+    existing = {a.name for a in list_attachments(pdf_path)}
+    collisions = [name for _, name in resolved if name in existing]
+    if collisions:
+        names = ", ".join(f"'{n}'" for n in collisions)
+        raise ValueError(
+            f"Attachment(s) already exist in the PDF: {names}. Use --name to rename them."
+        )
+
     writer = PdfWriter(clone_from=pdf_path)
 
-    for file in files:
-        writer.add_attachment(file.name, file.read_bytes())
+    for file, name in resolved:
+        writer.add_attachment(name, file.read_bytes())
 
     with open(output_path, "wb") as f:
         writer.write(f)
@@ -253,6 +297,30 @@ def cmd_get(
     typer.echo(f"Extracted: {att.name} → {out}  ({len(att.data)} bytes)")
 
 
+def _parse_renames(raw: list[str] | None) -> dict[str, str]:
+    """Parse a list of 'old:new' rename strings into a dict."""
+    if not raw:
+        return {}
+    renames: dict[str, str] = {}
+    for item in raw:
+        if ":" not in item:
+            typer.echo(
+                f"Error: invalid --name format '{item}'. Expected 'original:newname'.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        old, new = item.split(":", 1)
+        if not old or not new:
+            typer.echo(
+                f"Error: invalid --name format '{item}'. "
+                f"Both original and new name must be non-empty.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        renames[old] = new
+    return renames
+
+
 @app.command("add", help="Embed one or more files into a PDF as document-level attachments.")
 def cmd_add(
     pdf: Annotated[
@@ -271,11 +339,19 @@ def cmd_add(
             help="Output PDF path. Defaults to overwriting the input PDF in place.",
         ),
     ] = None,
+    name: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--name",
+            "-n",
+            help=("Rename an attachment: 'original:newname'. Repeatable for multiple files."),
+        ),
+    ] = None,
 ) -> None:
     """Clones the input PDF, embeds the given files, and writes the result.
 
     Prints: "Added <N> attachment(s) → <path>" on success.
-    Exit code 1 if any input file is missing.
+    Exit code 1 if any input file is missing or names collide.
     """
     if not pdf.is_file():
         typer.echo(f"Error: PDF file not found: {pdf}", err=True)
@@ -286,8 +362,24 @@ def cmd_add(
             typer.echo(f"Error: file not found: {f}", err=True)
             raise typer.Exit(1)
 
+    renames = _parse_renames(name)
+
+    # Validate that --name keys match actual input files.
+    input_names = {f.name for f in files}
+    unknown = set(renames.keys()) - input_names
+    if unknown:
+        typer.echo(
+            f"Error: --name key(s) don't match any input file: {', '.join(sorted(unknown))}",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     out = str(output) if output else str(pdf)
-    count = add_attachment(str(pdf), files, out)
+    try:
+        count = add_attachment(str(pdf), files, out, renames=renames)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
     typer.echo(f"Added {count} attachment(s) → {out}")
 
 
