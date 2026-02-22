@@ -47,8 +47,14 @@ Extracted: hello.txt → /tmp/hello.txt  (13 bytes)
 ### Add attachments
 
 ```bash
-uvx --from git+https://github.com/iamwrm/pdf_attachments pdf-attachments add document.pdf data.csv image.png
-uvx --from git+https://github.com/iamwrm/pdf_attachments pdf-attachments add document.pdf data.csv -o document_with_attachments.pdf
+# Add and write to a new file
+uvx --from git+https://github.com/iamwrm/pdf_attachments pdf-attachments add document.pdf data.csv image.png -o document_with_attachments.pdf
+
+# Add and overwrite in place
+uvx --from git+https://github.com/iamwrm/pdf_attachments pdf-attachments add document.pdf data.csv --in-place
+
+# Rename attachments to avoid collisions
+uvx --from git+https://github.com/iamwrm/pdf_attachments pdf-attachments add document.pdf data.csv --name data.csv:data_v2.csv -o out.pdf
 ```
 
 > **Tip:** To avoid typing the full `uvx --from ...` each time, install it as a tool:
